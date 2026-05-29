@@ -20,19 +20,49 @@ Este repositório contém a API responsável por criar sessões de chat, orquest
 ## Pré-requisitos
 
 - Bun (recomendado) — https://bun.sh
-- PostgreSQL (local ou via Docker)
-- Docker & docker-compose (opcional, há um `docker-compose.yml` no repositório)
+- Docker & docker-compose (opcional, há um `docker-compose.yml` no repositório com PostgreSQL, Redis, Ollama e n8n)
 
 ## Variáveis de ambiente
 
-Crie um arquivo `.env` na raiz do backend com as variáveis abaixo (valores de exemplo):
+Crie um arquivo `.env` na raiz do backend com as variáveis abaixo:
 
+### Desenvolvimento Local (sem Docker)
 ```
 DATABASE_URL=postgres://admin:supersecretpassword@127.0.0.1:5432/blueprint_db
 OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_TIMEOUT=60000
 N8N_GENERATE_URL=http://localhost:5678/webhook/generate
 N8N_WEBHOOK_TOKEN=seu-token-secreto-super-seguro
+NODE_ENV=development
+PORT=3000
+```
+
+### Docker Compose (com serviços)
+```
+# PostgreSQL
+POSTGRES_USER=admin
+POSTGRES_PASSWORD=supersecretpassword
+POSTGRES_DB=blueprint_db
+
+# Redis
+REDIS_VERSION=7-alpine
+REDIS_PASSWORD=seu-redis-password
+
+# Ollama
+OLLAMA_VERSION=latest
+OLLAMA_MODEL=llama2
+
+# n8n
+N8N_VERSION=latest
+N8N_ENCRYPTION_KEY=seu-chave-encriptacao-n8n
+
+# Curl (para ollama-init)
+CURL_IMAGES_VERSION=latest
+
+# Backend
+DATABASE_URL=postgres://admin:supersecretpassword@postgres:5432/blueprint_db
+OLLAMA_URL=http://ollama:11434
+N8N_GENERATE_URL=http://n8n:5678/webhook/generate
 NODE_ENV=development
 PORT=3000
 ```
@@ -79,11 +109,49 @@ bun run test
 bun run lint
 ```
 
-- Iniciar serviços via Docker Compose (se aplicável):
+## Docker Compose
+
+O projeto inclui um `docker-compose.yml` com todos os serviços necessários:
+
+- **PostgreSQL 16** — Banco de dados principal
+- **Redis** — Cache e fila para o n8n (BullMQ)
+- **Ollama** — Servidor de modelos LLM com download automático do modelo
+- **n8n** — Orquestração de workflows e automações
+- **ollama-init** — Serviço auxiliar para baixar o modelo Ollama automaticamente
+
+### Iniciar todos os serviços:
 
 ```bash
 docker-compose up -d
 ```
+
+### Serviços e portas expostas:
+
+- PostgreSQL: `localhost:5432` (interno `postgres:5432`)
+- Redis: interno `redis:6379`
+- Ollama: `localhost:11434`
+- n8n: `localhost:5678`
+
+### Verificar status dos serviços:
+
+```bash
+docker-compose ps
+docker-compose logs -f [service_name]  # ex: docker-compose logs -f n8n
+```
+
+### Parar os serviços:
+
+```bash
+docker-compose down
+```
+
+### Limpar volumes e dados persistidos:
+
+```bash
+docker-compose down -v
+```
+
+**Nota:** O n8n está configurado para rodar em modo de fila única (simples). Descomente `EXECUTIONS_MODE=queue` no `docker-compose.yml` para ativar modo de fila distribuída quando escalar para múltiplas instâncias.
 
 ## Endpoints principais
 
@@ -93,8 +161,19 @@ docker-compose up -d
 
 ## Desenvolvimento
 
+### Com Docker Compose (recomendado):
+
+1. Configure o arquivo `.env` com as variáveis de Docker Compose.
+2. Inicie os serviços: `docker-compose up -d`
+3. Instale dependências do backend: `bun install`
+4. Aplique as migrações: `bun run db:push`
+5. (Opcional) Popular dados: `bun run db:seed`
+6. Execute em modo desenvolvimento: `bun run dev`
+
+### Desenvolvimento Local (sem Docker):
+
 1. Instale dependências com `bun install`.
-2. Crie/ajuste `.env` conforme necessário.
+2. Configure o arquivo `.env` com as variáveis locais.
 3. Execute `bun run dev` para desenvolver com recarregamento automático.
 
 ## Observações

@@ -2,60 +2,111 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: blueprint_postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: supersecretpassword
-      POSTGRES_DB: blueprint_db
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - automations_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d blueprint_db"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:${REDIS_VERSION}
+    container_name: blueprint_redis
+    restart: unless-stopped
+    command: /bin/sh -c 'redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes'
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - automations_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "auth", "$$REDIS_PASSWORD", "ping"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:${OLLAMA_VERSION}
     container_name: blueprint_ollama
     ports:
       - "11434:11434"
+    restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
+    networks:
+      - automations_net
 
   ollama-init:
-    image: curlimages/curl:latest
+    image: curlimages/curl:${CURL_IMAGES_VERSION}
     container_name: blueprint_ollama_init
+    networks:
+      - automations_net
     depends_on:
       - ollama
     command: >
       sh -c "
       echo 'Aguardando Ollama iniciar...' && 
       until curl -s http://ollama:11434/api/tags > /dev/null; do sleep 3; done; 
-      echo 'Ollama online! Baixando modelo qwen2.5:7b...' && 
-      curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"qwen2.5:7b\"}'
+      echo 'Ollama online! Baixando modelo ${OLLAMA_MODEL}...' && 
+      curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"${OLLAMA_MODEL}\"}'
       "
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:${N8N_VERSION}
     container_name: blueprint_n8n
+    restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       ollama:
         condition: service_started
     ports:
       - "5678:5678"
     environment:
+      # Configurações de Host
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      
+      # Banco de Dados
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+
+      # Integração Redis para Cache e Fila do n8n (BullMQ)
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      - QUEUE_BULL_REDIS_PASSWORD=${REDIS_PASSWORD}
+      
+      # Descomente a linha abaixo quando for migrar o n8n para Queue Mode (Escalabilidade Horizontal)
+      # - EXECUTIONS_MODE=queue
     volumes:
       - n8n_data:/home/node/.n8n
+    networks:
+      - automations_net
 
 volumes:
   pgdata:
+  redis_data:
   n8n_data:
   ollama_data:
+
+networks:
+  automations_net:
+    driver: bridge
